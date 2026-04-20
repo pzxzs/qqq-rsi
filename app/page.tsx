@@ -15,6 +15,12 @@ type WeeklyRSIRow = WeeklyRow & {
   rsi: number | null;
 };
 
+type ModeType = "공격모드" | "안전모드" | "판단 없음";
+
+type WeeklyModeRow = WeeklyRSIRow & {
+  nextWeekMode: ModeType;
+};
+
 function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
   const closes = rows.map((r) => r.close);
   const changes = closes.map((close, i) => (i === 0 ? null : close - closes[i - 1]));
@@ -63,7 +69,7 @@ function buildLinePath(values: number[], width: number, height: number) {
   return `M ${points.join(" L ")}`;
 }
 
-function getNextWeekMode(prev: number, curr: number) {
+function getNextWeekMode(prev: number, curr: number): ModeType {
   const isUp = curr > prev;
   const isDown = curr < prev;
 
@@ -86,6 +92,12 @@ function getNextWeekMode(prev: number, curr: number) {
   }
 
   return "판단 없음";
+}
+
+function getModeColorClass(mode: ModeType) {
+  if (mode === "공격모드") return "text-red-600";
+  if (mode === "안전모드") return "text-green-600";
+  return "text-gray-500";
 }
 
 export default function HomePage() {
@@ -133,14 +145,28 @@ export default function HomePage() {
     return calculateCutlerRSI(rows, 14).filter((row) => row.rsi !== null);
   }, [rows]);
 
-  const latest = weeklyRSI.at(-1) ?? null;
-  const prev = weeklyRSI.at(-2) ?? null;
-  const curr = weeklyRSI.at(-1) ?? null;
+  const modeHistory = useMemo<WeeklyModeRow[]>(() => {
+    return weeklyRSI.map((row, index) => {
+      if (index === 0) {
+        return {
+          ...row,
+          nextWeekMode: "판단 없음",
+        };
+      }
 
-  const nextWeekMode =
-    prev?.rsi != null && curr?.rsi != null
-      ? getNextWeekMode(prev.rsi, curr.rsi)
-      : "-";
+      const prev = weeklyRSI[index - 1];
+      const curr = weeklyRSI[index];
+
+      return {
+        ...row,
+        nextWeekMode: getNextWeekMode(prev.rsi as number, curr.rsi as number),
+      };
+    });
+  }, [weeklyRSI]);
+
+  const latest = weeklyRSI.at(-1) ?? null;
+  const latestModeRow = modeHistory.at(-1) ?? null;
+  const nextWeekMode = latestModeRow?.nextWeekMode ?? "-";
 
   const chartRows = weeklyRSI.slice(-40);
   const chartValues = chartRows.map((r) => r.rsi as number);
@@ -186,11 +212,9 @@ export default function HomePage() {
                 <div className="text-sm text-slate-500">다음 주 매매 모드</div>
                 <div
                   className={`mt-2 text-2xl font-semibold ${
-                    nextWeekMode === "공격모드"
-                      ? "text-red-600"
-                      : nextWeekMode === "안전모드"
-                      ? "text-green-600"
-                      : "text-gray-500"
+                    nextWeekMode === "-"
+                      ? "text-gray-500"
+                      : getModeColorClass(nextWeekMode as ModeType)
                   }`}
                 >
                   {nextWeekMode}
@@ -238,6 +262,38 @@ export default function HomePage() {
                           <td className="px-4 py-3">{row.date}</td>
                           <td className="px-4 py-3">{row.close.toFixed(2)}</td>
                           <td className="px-4 py-3 font-medium">{row.rsi}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <section className="mt-8 rounded-2xl border bg-white p-6 shadow-sm">
+              <h2 className="text-xl font-semibold">모드 히스토리 (최근 20주)</h2>
+
+              <div className="mt-4 overflow-x-auto">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="border-b bg-slate-100 text-left">
+                      <th className="px-4 py-3">기준 주 날짜</th>
+                      <th className="px-4 py-3">종가</th>
+                      <th className="px-4 py-3">RSI</th>
+                      <th className="px-4 py-3">다음 주 모드</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[...modeHistory]
+                      .slice(-20)
+                      .reverse()
+                      .map((row) => (
+                        <tr key={`mode-${row.date}`} className="border-b last:border-0">
+                          <td className="px-4 py-3">{row.date}</td>
+                          <td className="px-4 py-3">{row.close.toFixed(2)}</td>
+                          <td className="px-4 py-3">{row.rsi}</td>
+                          <td className={`px-4 py-3 font-semibold ${getModeColorClass(row.nextWeekMode)}`}>
+                            {row.nextWeekMode}
+                          </td>
                         </tr>
                       ))}
                   </tbody>
