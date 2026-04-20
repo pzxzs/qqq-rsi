@@ -29,8 +29,8 @@ function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
     const gainSlice = gains.slice(i - length + 1, i + 1);
     const lossSlice = losses.slice(i - length + 1, i + 1);
 
-    const avgGain = gainSlice.reduce((sum, v) => sum + (v ?? 0), 0) / length;
-    const avgLoss = lossSlice.reduce((sum, v) => sum + (v ?? 0), 0) / length;
+    const avgGain = gainSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
+    const avgLoss = lossSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
 
     let rsi: number;
     if (avgGain === 0 && avgLoss === 0) {
