@@ -18,7 +18,7 @@ type WeeklyRSIRow = WeeklyRow & {
 type ModeType = "공격모드" | "안전모드";
 
 type WeeklyModeRow = WeeklyRSIRow & {
-  nextWeekMode: ModeType;
+  mode: ModeType;
 };
 
 function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
@@ -73,20 +73,18 @@ function getTriggeredMode(prev: number, curr: number): ModeType | null {
   const isUp = curr > prev;
   const isDown = curr < prev;
 
-  // 공격모드 조건
   if (
-    (prev <= 50 && curr > 50) ||           // RSI가 50 위로 상승
-    (curr > 50 && curr < 60 && isUp) ||    // 50 < RSI < 60 에서 상승
-    (curr < 35 && isUp)                    // RSI < 35 영역에서 상승
+    (prev <= 50 && curr > 50) ||
+    (curr > 50 && curr < 60 && isUp) ||
+    (curr < 35 && isUp)
   ) {
     return "공격모드";
   }
 
-  // 안전모드 조건
   if (
-    (curr > 65 && isDown) ||               // RSI > 65 영역에서 하락
-    (curr > 40 && curr < 50 && isDown) ||  // 40 < RSI < 50 에서 하락
-    (prev >= 50 && curr < 50)              // RSI가 50 밑으로 하락
+    (curr > 65 && isDown) ||
+    (curr > 40 && curr < 50 && isDown) ||
+    (prev >= 50 && curr < 50)
   ) {
     return "안전모드";
   }
@@ -95,8 +93,7 @@ function getTriggeredMode(prev: number, curr: number): ModeType | null {
 }
 
 function getModeColorClass(mode: ModeType) {
-  if (mode === "공격모드") return "text-red-600";
-  return "text-green-600";
+  return mode === "공격모드" ? "text-red-600" : "text-green-600";
 }
 
 export default function HomePage() {
@@ -155,13 +152,13 @@ export default function HomePage() {
       if (i === 0) {
         result.push({
           ...row,
-          nextWeekMode: "안전모드",
+          mode: "안전모드",
         });
         continue;
       }
 
       const prevRow = weeklyRSI[i - 1];
-      const prevMode = result[i - 1].nextWeekMode;
+      const prevMode = result[i - 1].mode;
       const triggeredMode = getTriggeredMode(
         prevRow.rsi as number,
         row.rsi as number
@@ -169,7 +166,7 @@ export default function HomePage() {
 
       result.push({
         ...row,
-        nextWeekMode: triggeredMode ?? prevMode,
+        mode: triggeredMode ?? prevMode,
       });
     }
 
@@ -177,8 +174,8 @@ export default function HomePage() {
   }, [weeklyRSI]);
 
   const latest = weeklyRSI.at(-1) ?? null;
-  const latestModeRow = modeHistory.at(-1) ?? null;
-  const nextWeekMode = latestModeRow?.nextWeekMode ?? "안전모드";
+  const currentModeRow = modeHistory.at(-1) ?? null;
+  const currentWeekMode = currentModeRow?.mode ?? "안전모드";
 
   const chartRows = weeklyRSI.slice(-40);
   const chartValues = chartRows.map((r) => r.rsi as number);
@@ -189,7 +186,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          QQQ 주봉 데이터를 자동으로 받아와서 Cutler RSI를 계산하고 다음 주 매매 모드를 표시한다.
+          QQQ 주봉 데이터를 자동으로 받아와서 Cutler RSI를 계산하고 주간 매매 모드를 표시한다.
         </p>
 
         {loading ? (
@@ -221,9 +218,9 @@ export default function HomePage() {
               </div>
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
-                <div className="text-sm text-slate-500">다음 주 매매 모드</div>
-                <div className={`mt-2 text-2xl font-semibold ${getModeColorClass(nextWeekMode)}`}>
-                  {nextWeekMode}
+                <div className="text-sm text-slate-500">현재 주간 모드</div>
+                <div className={`mt-2 text-2xl font-semibold ${getModeColorClass(currentWeekMode)}`}>
+                  {currentWeekMode}
                 </div>
               </div>
             </section>
@@ -248,7 +245,7 @@ export default function HomePage() {
             </section>
 
             <section className="mt-8 rounded-2xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold">모드 히스토리 (최근 20주)</h2>
+              <h2 className="text-xl font-semibold">주간 모드 히스토리 (최근 20주)</h2>
 
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full border-collapse text-sm">
@@ -257,7 +254,7 @@ export default function HomePage() {
                       <th className="px-4 py-3">기준 주 날짜</th>
                       <th className="px-4 py-3">종가</th>
                       <th className="px-4 py-3">RSI</th>
-                      <th className="px-4 py-3">다음 주 모드</th>
+                      <th className="px-4 py-3">그 주간 모드</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -269,8 +266,8 @@ export default function HomePage() {
                           <td className="px-4 py-3">{row.date}</td>
                           <td className="px-4 py-3">{row.close.toFixed(2)}</td>
                           <td className="px-4 py-3">{row.rsi}</td>
-                          <td className={`px-4 py-3 font-semibold ${getModeColorClass(row.nextWeekMode)}`}>
-                            {row.nextWeekMode}
+                          <td className={`px-4 py-3 font-semibold ${getModeColorClass(row.mode)}`}>
+                            {row.mode}
                           </td>
                         </tr>
                       ))}
