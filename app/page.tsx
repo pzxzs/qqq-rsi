@@ -265,7 +265,7 @@ export default function HomePage() {
             </section>
 
             <section className="mt-8 rounded-2xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold">주간 모드 히스토리 (최근 20주)</h2>
+              <h2 className="text-xl font-semibold">주간 모드 히스토리 (최근 50주)</h2>
 
               <div className="mt-4 overflow-x-auto">
                 <table className="min-w-full border-collapse text-sm">
@@ -281,7 +281,7 @@ export default function HomePage() {
                   <tbody>
                     {[...modeHistory]
                       .filter((row) => row.mode !== null)
-                      .slice(-20)
+                      .slice(-50)
                       .reverse()
                       .map((row) => (
                         <tr key={`mode-${row.mondayDate}`} className="border-b last:border-0">
