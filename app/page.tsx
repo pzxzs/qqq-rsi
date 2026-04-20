@@ -29,8 +29,10 @@ function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
     const gainSlice = gains.slice(i - length + 1, i + 1);
     const lossSlice = losses.slice(i - length + 1, i + 1);
 
-    const avgGain = gainSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
-    const avgLoss = lossSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
+    const avgGain =
+      gainSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
+    const avgLoss =
+      lossSlice.reduce<number>((sum, v) => sum + (v ?? 0), 0) / length;
 
     let rsi: number;
     if (avgGain === 0 && avgLoss === 0) {
@@ -59,6 +61,31 @@ function buildLinePath(values: number[], width: number, height: number) {
   });
 
   return `M ${points.join(" L ")}`;
+}
+
+function getNextWeekMode(prev: number, curr: number) {
+  const isUp = curr > prev;
+  const isDown = curr < prev;
+
+  // 공격모드
+  if (
+    (prev <= 50 && curr > 50) ||           // RSI가 50 위로 상승
+    (curr > 50 && curr < 60 && isUp) ||    // 50 < RSI < 60 에서 상승
+    (curr < 35 && isUp)                    // RSI < 35 영역에서 상승
+  ) {
+    return "공격모드";
+  }
+
+  // 안전모드
+  if (
+    (curr > 65 && isDown) ||               // RSI > 65 영역에서 하락
+    (curr > 40 && curr < 50 && isDown) ||  // 40 < RSI < 50 에서 하락
+    (prev >= 50 && curr < 50)              // RSI가 50 밑으로 하락
+  ) {
+    return "안전모드";
+  }
+
+  return "판단 없음";
 }
 
 export default function HomePage() {
@@ -107,6 +134,14 @@ export default function HomePage() {
   }, [rows]);
 
   const latest = weeklyRSI.at(-1) ?? null;
+  const prev = weeklyRSI.at(-2) ?? null;
+  const curr = weeklyRSI.at(-1) ?? null;
+
+  const nextWeekMode =
+    prev?.rsi != null && curr?.rsi != null
+      ? getNextWeekMode(prev.rsi, curr.rsi)
+      : "-";
+
   const chartRows = weeklyRSI.slice(-40);
   const chartValues = chartRows.map((r) => r.rsi as number);
   const path = buildLinePath(chartValues, 800, 260);
@@ -116,7 +151,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          QQQ 주봉 데이터를 자동으로 받아와서 Cutler RSI를 계산한다.
+          QQQ 주봉 데이터를 자동으로 받아와서 Cutler RSI를 계산하고 다음 주 매매 모드를 표시한다.
         </p>
 
         {loading ? (
@@ -127,7 +162,7 @@ export default function HomePage() {
           </div>
         ) : (
           <>
-            <section className="mt-8 grid gap-4 md:grid-cols-3">
+            <section className="mt-8 grid gap-4 md:grid-cols-4">
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
                 <div className="text-sm text-slate-500">종목</div>
                 <div className="mt-2 text-2xl font-semibold">QQQ</div>
@@ -144,6 +179,21 @@ export default function HomePage() {
                 <div className="text-sm text-slate-500">최신 Cutler RSI(14)</div>
                 <div className="mt-2 text-2xl font-semibold">
                   {latest ? latest.rsi : "-"}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border bg-white p-6 shadow-sm">
+                <div className="text-sm text-slate-500">다음 주 매매 모드</div>
+                <div
+                  className={`mt-2 text-2xl font-semibold ${
+                    nextWeekMode === "공격모드"
+                      ? "text-red-600"
+                      : nextWeekMode === "안전모드"
+                      ? "text-green-600"
+                      : "text-gray-500"
+                  }`}
+                >
+                  {nextWeekMode}
                 </div>
               </div>
             </section>
