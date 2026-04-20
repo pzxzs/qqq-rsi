@@ -15,7 +15,7 @@ type WeeklyRSIRow = WeeklyRow & {
   rsi: number | null;
 };
 
-type ModeType = "공격모드" | "안전모드" | "판단 없음";
+type ModeType = "공격모드" | "안전모드";
 
 type WeeklyModeRow = WeeklyRSIRow & {
   nextWeekMode: ModeType;
@@ -69,11 +69,11 @@ function buildLinePath(values: number[], width: number, height: number) {
   return `M ${points.join(" L ")}`;
 }
 
-function getNextWeekMode(prev: number, curr: number): ModeType {
+function getTriggeredMode(prev: number, curr: number): ModeType | null {
   const isUp = curr > prev;
   const isDown = curr < prev;
 
-  // 공격모드
+  // 공격모드 조건
   if (
     (prev <= 50 && curr > 50) ||           // RSI가 50 위로 상승
     (curr > 50 && curr < 60 && isUp) ||    // 50 < RSI < 60 에서 상승
@@ -82,7 +82,7 @@ function getNextWeekMode(prev: number, curr: number): ModeType {
     return "공격모드";
   }
 
-  // 안전모드
+  // 안전모드 조건
   if (
     (curr > 65 && isDown) ||               // RSI > 65 영역에서 하락
     (curr > 40 && curr < 50 && isDown) ||  // 40 < RSI < 50 에서 하락
@@ -91,13 +91,12 @@ function getNextWeekMode(prev: number, curr: number): ModeType {
     return "안전모드";
   }
 
-  return "판단 없음";
+  return null;
 }
 
 function getModeColorClass(mode: ModeType) {
   if (mode === "공격모드") return "text-red-600";
-  if (mode === "안전모드") return "text-green-600";
-  return "text-gray-500";
+  return "text-green-600";
 }
 
 export default function HomePage() {
@@ -146,27 +145,40 @@ export default function HomePage() {
   }, [rows]);
 
   const modeHistory = useMemo<WeeklyModeRow[]>(() => {
-    return weeklyRSI.map((row, index) => {
-      if (index === 0) {
-        return {
+    if (weeklyRSI.length === 0) return [];
+
+    const result: WeeklyModeRow[] = [];
+
+    for (let i = 0; i < weeklyRSI.length; i++) {
+      const row = weeklyRSI[i];
+
+      if (i === 0) {
+        result.push({
           ...row,
-          nextWeekMode: "판단 없음",
-        };
+          nextWeekMode: "안전모드",
+        });
+        continue;
       }
 
-      const prev = weeklyRSI[index - 1];
-      const curr = weeklyRSI[index];
+      const prevRow = weeklyRSI[i - 1];
+      const prevMode = result[i - 1].nextWeekMode;
+      const triggeredMode = getTriggeredMode(
+        prevRow.rsi as number,
+        row.rsi as number
+      );
 
-      return {
+      result.push({
         ...row,
-        nextWeekMode: getNextWeekMode(prev.rsi as number, curr.rsi as number),
-      };
-    });
+        nextWeekMode: triggeredMode ?? prevMode,
+      });
+    }
+
+    return result;
   }, [weeklyRSI]);
 
   const latest = weeklyRSI.at(-1) ?? null;
   const latestModeRow = modeHistory.at(-1) ?? null;
-  const nextWeekMode = latestModeRow?.nextWeekMode ?? "-";
+  const nextWeekMode = latestModeRow?.nextWeekMode ?? "안전모드";
 
   const chartRows = weeklyRSI.slice(-40);
   const chartValues = chartRows.map((r) => r.rsi as number);
@@ -210,13 +222,7 @@ export default function HomePage() {
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
                 <div className="text-sm text-slate-500">다음 주 매매 모드</div>
-                <div
-                  className={`mt-2 text-2xl font-semibold ${
-                    nextWeekMode === "-"
-                      ? "text-gray-500"
-                      : getModeColorClass(nextWeekMode as ModeType)
-                  }`}
-                >
+                <div className={`mt-2 text-2xl font-semibold ${getModeColorClass(nextWeekMode)}`}>
                   {nextWeekMode}
                 </div>
               </div>
@@ -238,34 +244,6 @@ export default function HomePage() {
                 <span>70</span>
                 <span>50</span>
                 <span>30</span>
-              </div>
-            </section>
-
-            <section className="mt-8 rounded-2xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold">최근 20주 데이터</h2>
-
-              <div className="mt-4 overflow-x-auto">
-                <table className="min-w-full border-collapse text-sm">
-                  <thead>
-                    <tr className="border-b bg-slate-100 text-left">
-                      <th className="px-4 py-3">날짜</th>
-                      <th className="px-4 py-3">종가</th>
-                      <th className="px-4 py-3">RSI</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[...weeklyRSI]
-                      .slice(-20)
-                      .reverse()
-                      .map((row) => (
-                        <tr key={row.date} className="border-b last:border-0">
-                          <td className="px-4 py-3">{row.date}</td>
-                          <td className="px-4 py-3">{row.close.toFixed(2)}</td>
-                          <td className="px-4 py-3 font-medium">{row.rsi}</td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
               </div>
             </section>
 
