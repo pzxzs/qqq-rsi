@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 
 type WeeklyRow = {
-  date: string;
+  date: string; // API에서 받는 금요일 날짜
   open: number;
   high: number;
   low: number;
@@ -17,9 +17,27 @@ type WeeklyRSIRow = WeeklyRow & {
 
 type ModeType = "공격모드" | "안전모드";
 
-type WeeklyModeRow = WeeklyRSIRow & {
+type WeeklyModeRow = {
+  mondayDate: string;   // 실제 표시할 주간 시작일(월요일)
+  basedOnFriday: string; // 이 모드를 결정한 직전 금요일
+  close: number;
+  rsi: number;
   mode: ModeType | null;
 };
+
+function addDays(dateStr: string, days: number) {
+  const date = new Date(`${dateStr}T00:00:00`);
+  date.setDate(date.getDate() + days);
+
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function getNextMondayFromFriday(fridayDate: string) {
+  return addDays(fridayDate, 3);
+}
 
 function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
   const closes = rows.map((r) => r.close);
@@ -146,26 +164,18 @@ export default function HomePage() {
   }, [rows]);
 
   const modeHistory = useMemo<WeeklyModeRow[]>(() => {
-    if (weeklyRSI.length === 0) return [];
+    if (weeklyRSI.length < 2) return [];
 
     const result: WeeklyModeRow[] = [];
     let activeMode: ModeType | null = null;
 
-    for (let i = 0; i < weeklyRSI.length; i++) {
-      const row = weeklyRSI[i];
+    for (let i = 1; i < weeklyRSI.length; i++) {
+      const prevRow = weeklyRSI[i - 1]; // 전전주 금요일
+      const currRow = weeklyRSI[i];     // 전주 금요일
 
-      if (i === 0) {
-        result.push({
-          ...row,
-          mode: null,
-        });
-        continue;
-      }
-
-      const prevRow = weeklyRSI[i - 1];
       const triggeredMode = getTriggeredMode(
         prevRow.rsi as number,
-        row.rsi as number
+        currRow.rsi as number
       );
 
       if (triggeredMode !== null) {
@@ -173,7 +183,10 @@ export default function HomePage() {
       }
 
       result.push({
-        ...row,
+        mondayDate: getNextMondayFromFriday(currRow.date), // 이 월요일 주간 모드
+        basedOnFriday: currRow.date,
+        close: currRow.close,
+        rsi: currRow.rsi as number,
         mode: activeMode,
       });
     }
@@ -181,9 +194,10 @@ export default function HomePage() {
     return result;
   }, [weeklyRSI]);
 
-  const latest = weeklyRSI.at(-1) ?? null;
+  const latestRSI = weeklyRSI.at(-1) ?? null;
   const currentModeRow = modeHistory.at(-1) ?? null;
   const currentWeekMode = currentModeRow?.mode ?? null;
+  const currentMondayDate = currentModeRow?.mondayDate ?? "-";
 
   const chartRows = weeklyRSI.slice(-40);
   const chartValues = chartRows.map((r) => r.rsi as number);
@@ -194,7 +208,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          QQQ 주봉 데이터를 자동으로 받아와서 Cutler RSI를 계산하고 주간 매매 모드를 표시한다.
+          금요일에 확정된 RSI를 기준으로, 다음 월요일 주간에 적용되는 매매 모드를 표시한다.
         </p>
 
         {loading ? (
@@ -212,16 +226,14 @@ export default function HomePage() {
               </div>
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
-                <div className="text-sm text-slate-500">최신 주 날짜</div>
-                <div className="mt-2 text-2xl font-semibold">
-                  {latest ? latest.date : "-"}
-                </div>
+                <div className="text-sm text-slate-500">현재 주간 시작일</div>
+                <div className="mt-2 text-2xl font-semibold">{currentMondayDate}</div>
               </div>
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
-                <div className="text-sm text-slate-500">최신 Cutler RSI(14)</div>
+                <div className="text-sm text-slate-500">최근 확정 RSI(직전 금요일)</div>
                 <div className="mt-2 text-2xl font-semibold">
-                  {latest ? latest.rsi : "-"}
+                  {latestRSI ? latestRSI.rsi : "-"}
                 </div>
               </div>
 
@@ -259,7 +271,8 @@ export default function HomePage() {
                 <table className="min-w-full border-collapse text-sm">
                   <thead>
                     <tr className="border-b bg-slate-100 text-left">
-                      <th className="px-4 py-3">기준 주 날짜</th>
+                      <th className="px-4 py-3">주간 시작일(월)</th>
+                      <th className="px-4 py-3">기준 RSI 계산일(직전 금)</th>
                       <th className="px-4 py-3">종가</th>
                       <th className="px-4 py-3">RSI</th>
                       <th className="px-4 py-3">그 주간 모드</th>
@@ -271,8 +284,9 @@ export default function HomePage() {
                       .slice(-20)
                       .reverse()
                       .map((row) => (
-                        <tr key={`mode-${row.date}`} className="border-b last:border-0">
-                          <td className="px-4 py-3">{row.date}</td>
+                        <tr key={`mode-${row.mondayDate}`} className="border-b last:border-0">
+                          <td className="px-4 py-3">{row.mondayDate}</td>
+                          <td className="px-4 py-3">{row.basedOnFriday}</td>
                           <td className="px-4 py-3">{row.close.toFixed(2)}</td>
                           <td className="px-4 py-3">{row.rsi}</td>
                           <td className={`px-4 py-3 font-semibold ${getModeColorClass(row.mode)}`}>
