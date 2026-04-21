@@ -74,6 +74,33 @@ function getNextMondayFromFriday(fridayDate: string) {
   return addDays(fridayDate, 3);
 }
 
+/**
+ * 오늘 기준으로 "마지막으로 확정된 금요일" 계산
+ * - 월~금: 직전 주 금요일
+ * - 토/일: 방금 지난 금요일
+ */
+function getLastCompletedFriday(today = new Date()) {
+  const d = new Date(today);
+  d.setHours(0, 0, 0, 0);
+
+  const day = d.getDay(); // 0 일, 1 월, ... 5 금, 6 토
+  let diff: number;
+
+  if (day === 6) {
+    // 토요일 -> 어제 금요일
+    diff = -1;
+  } else if (day === 0) {
+    // 일요일 -> 이틀 전 금요일
+    diff = -2;
+  } else {
+    // 월~금 -> 지난주 금요일
+    diff = 5 - day - 7;
+  }
+
+  d.setDate(d.getDate() + diff);
+  return formatDate(d);
+}
+
 function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
   const closes = rows.map((r) => r.close);
   const changes = closes.map((close, i) => (i === 0 ? null : close - closes[i - 1]));
@@ -217,8 +244,8 @@ function getEvenlySpacedLabels<T>(items: T[], count: number) {
 }
 
 export default function HomePage() {
-  const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
-  const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
+  const [dailyRowsRaw, setDailyRowsRaw] = useState<DailyRow[]>([]);
+  const [weeklyRowsRaw, setWeeklyRowsRaw] = useState<WeeklyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -238,8 +265,8 @@ export default function HomePage() {
         }
 
         if (!cancelled) {
-          setDailyRows(data.dailyRows || []);
-          setWeeklyRows(data.weeklyRows || []);
+          setDailyRowsRaw(data.dailyRows || []);
+          setWeeklyRowsRaw(data.weeklyRows || []);
         }
       } catch (err) {
         if (!cancelled) {
@@ -258,6 +285,18 @@ export default function HomePage() {
       cancelled = true;
     };
   }, []);
+
+  const lastCompletedFriday = useMemo(() => getLastCompletedFriday(), []);
+
+  const weeklyRows = useMemo(
+    () => weeklyRowsRaw.filter((row) => row.date <= lastCompletedFriday),
+    [weeklyRowsRaw, lastCompletedFriday]
+  );
+
+  const dailyRows = useMemo(
+    () => dailyRowsRaw.filter((row) => row.date <= lastCompletedFriday),
+    [dailyRowsRaw, lastCompletedFriday]
+  );
 
   const weeklyRSI = useMemo(() => {
     return calculateCutlerRSI(weeklyRows, 14).filter((row) => row.rsi !== null);
@@ -370,7 +409,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          주봉 RSI와 주간 모드는 50주 기준으로 보고, 일봉 차트는 무료 API 한도상 최근 100거래일만 표시한다.
+          확정된 마지막 금요일 기준 데이터만 사용한다. 현재 기준 마감 주는 {lastCompletedFriday}이다.
         </p>
 
         {loading ? (
