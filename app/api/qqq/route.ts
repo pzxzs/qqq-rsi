@@ -10,6 +10,14 @@ type AlphaVantageDailyRow = {
   "5. volume": string;
 };
 
+type AlphaVantageWeeklyRow = {
+  "1. open": string;
+  "2. high": string;
+  "3. low": string;
+  "4. close": string;
+  "5. volume": string;
+};
+
 export async function GET() {
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
@@ -20,54 +28,84 @@ export async function GET() {
     );
   }
 
-  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=QQQ&outputsize=full&apikey=${apiKey}`;
+  const dailyUrl =
+    `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=QQQ&outputsize=compact&apikey=${apiKey}`;
 
-  const res = await fetch(url, { cache: "no-store" });
+  const weeklyUrl =
+    `https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol=QQQ&apikey=${apiKey}`;
 
-  if (!res.ok) {
+  const [dailyRes, weeklyRes] = await Promise.all([
+    fetch(dailyUrl, { cache: "no-store" }),
+    fetch(weeklyUrl, { cache: "no-store" }),
+  ]);
+
+  if (!dailyRes.ok || !weeklyRes.ok) {
     return NextResponse.json(
       { error: "외부 데이터 요청에 실패했습니다." },
       { status: 502 }
     );
   }
 
-  const data = await res.json();
+  const [dailyData, weeklyData] = await Promise.all([
+    dailyRes.json(),
+    weeklyRes.json(),
+  ]);
 
-  if (data["Error Message"]) {
+  const errorMessage =
+    dailyData["Error Message"] ||
+    weeklyData["Error Message"] ||
+    dailyData["Note"] ||
+    weeklyData["Note"] ||
+    dailyData["Information"] ||
+    weeklyData["Information"];
+
+  if (errorMessage) {
     return NextResponse.json(
-      { error: "Alpha Vantage가 오류를 반환했습니다.", detail: data["Error Message"] },
+      { error: "Alpha Vantage 응답 오류", detail: errorMessage },
       { status: 500 }
     );
   }
 
-  if (data["Note"]) {
-    return NextResponse.json(
-      { error: "API 호출 제한에 걸렸습니다.", detail: data["Note"] },
-      { status: 429 }
-    );
-  }
-
-  if (data["Information"]) {
-    return NextResponse.json(
-      { error: "Alpha Vantage 안내 메시지", detail: data["Information"], raw: data },
-      { status: 500 }
-    );
-  }
-
-  const series = data["Time Series (Daily)"] as
+  const dailySeries = dailyData["Time Series (Daily)"] as
     | Record<string, AlphaVantageDailyRow>
     | undefined;
 
-  if (!series) {
+  const weeklySeries = weeklyData["Weekly Time Series"] as
+    | Record<string, AlphaVantageWeeklyRow>
+    | undefined;
+
+  if (!dailySeries || !weeklySeries) {
     return NextResponse.json(
-      { error: "일봉 데이터가 없습니다.", raw: data },
+      {
+        error: "일봉 또는 주봉 데이터가 없습니다.",
+        raw: { dailyData, weeklyData },
+      },
       { status: 500 }
     );
   }
 
-  const rows = Object.entries(series)
+  const dailyRows = Object.entries(dailySeries)
     .map(([date, value]) => ({
       date,
+      open: Number(value["1. open"]),
+      high: Number(value["2. high"]),
+      low: Number(value["3. low"]),
+      close: Number(value["4. close"]),
+      volume: Number(value["5. volume"]),
+    }))
+    .filter(
+      (row) =>
+        row.date &&
+        Number.isFinite(row.open) &&
+        Number.isFinite(row.high) &&
+        Number.isFinite(row.low) &&
+        Number.isFinite(row.close)
+    )
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const weeklyRows = Object.entries(weeklySeries)
+    .map(([date, value]) => ({
+      date, // 금요일 기준
       open: Number(value["1. open"]),
       high: Number(value["2. high"]),
       low: Number(value["3. low"]),
@@ -88,7 +126,8 @@ export async function GET() {
     {
       symbol: "QQQ",
       source: "Alpha Vantage",
-      rows,
+      dailyRows,
+      weeklyRows,
     },
     {
       headers: {

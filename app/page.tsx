@@ -12,8 +12,7 @@ type DailyRow = {
 };
 
 type WeeklyRow = {
-  mondayDate: string;
-  weekEndDate: string;
+  date: string; // 금요일
   open: number;
   high: number;
   low: number;
@@ -65,7 +64,7 @@ function addDays(dateStr: string, days: number) {
 
 function getMondayOfWeek(dateStr: string) {
   const date = new Date(`${dateStr}T00:00:00`);
-  const day = date.getDay(); // 0:일 ~ 6:토
+  const day = date.getDay();
   const diff = day === 0 ? -6 : 1 - day;
   date.setDate(date.getDate() + diff);
   return formatDate(date);
@@ -73,36 +72,6 @@ function getMondayOfWeek(dateStr: string) {
 
 function getNextMondayFromFriday(fridayDate: string) {
   return addDays(fridayDate, 3);
-}
-
-function aggregateDailyToWeekly(rows: DailyRow[]): WeeklyRow[] {
-  const sorted = [...rows].sort((a, b) => a.date.localeCompare(b.date));
-  const map = new Map<string, WeeklyRow>();
-
-  for (const row of sorted) {
-    const mondayDate = getMondayOfWeek(row.date);
-
-    if (!map.has(mondayDate)) {
-      map.set(mondayDate, {
-        mondayDate,
-        weekEndDate: row.date,
-        open: row.open,
-        high: row.high,
-        low: row.low,
-        close: row.close,
-        volume: row.volume,
-      });
-    } else {
-      const current = map.get(mondayDate)!;
-      current.high = Math.max(current.high, row.high);
-      current.low = Math.min(current.low, row.low);
-      current.close = row.close;
-      current.weekEndDate = row.date;
-      current.volume += row.volume;
-    }
-  }
-
-  return [...map.values()].sort((a, b) => a.weekEndDate.localeCompare(b.weekEndDate));
 }
 
 function calculateCutlerRSI(rows: WeeklyRow[], length = 14): WeeklyRSIRow[] {
@@ -182,6 +151,24 @@ function getModePointColor(mode: ModeType | null) {
 function buildLinePath(values: number[], width: number, height: number) {
   if (values.length === 0) return "";
 
+  const minValue = Math.min(...values);
+  const maxValue = Math.max(...values);
+  const padding = (maxValue - minValue) * 0.05 || 1;
+  const bottom = minValue - padding;
+  const top = maxValue + padding;
+
+  const points = values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * width;
+    const y = height - ((v - bottom) / (top - bottom)) * height;
+    return `${x},${y}`;
+  });
+
+  return `M ${points.join(" L ")}`;
+}
+
+function buildRSILinePath(values: number[], width: number, height: number) {
+  if (values.length === 0) return "";
+
   const points = values.map((v, i) => {
     const x = (i / Math.max(values.length - 1, 1)) * width;
     const y = height - (v / 100) * height;
@@ -205,12 +192,12 @@ function buildPriceChartPoints(values: number[], width: number, height: number):
   const minValue = Math.min(...values);
   const maxValue = Math.max(...values);
   const padding = (maxValue - minValue) * 0.05 || 1;
-  const minYValue = minValue - padding;
-  const maxYValue = maxValue + padding;
+  const bottom = minValue - padding;
+  const top = maxValue + padding;
 
   return values.map((v, i) => {
     const x = (i / Math.max(values.length - 1, 1)) * width;
-    const y = height - ((v - minYValue) / (maxYValue - minYValue)) * height;
+    const y = height - ((v - bottom) / (top - bottom)) * height;
     return { x, y };
   });
 }
@@ -230,7 +217,8 @@ function getEvenlySpacedLabels<T>(items: T[], count: number) {
 }
 
 export default function HomePage() {
-  const [rows, setRows] = useState<DailyRow[]>([]);
+  const [dailyRows, setDailyRows] = useState<DailyRow[]>([]);
+  const [weeklyRows, setWeeklyRows] = useState<WeeklyRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
@@ -250,7 +238,8 @@ export default function HomePage() {
         }
 
         if (!cancelled) {
-          setRows(data.rows || []);
+          setDailyRows(data.dailyRows || []);
+          setWeeklyRows(data.weeklyRows || []);
         }
       } catch (err) {
         if (!cancelled) {
@@ -269,8 +258,6 @@ export default function HomePage() {
       cancelled = true;
     };
   }, []);
-
-  const weeklyRows = useMemo(() => aggregateDailyToWeekly(rows), [rows]);
 
   const weeklyRSI = useMemo(() => {
     return calculateCutlerRSI(weeklyRows, 14).filter((row) => row.rsi !== null);
@@ -296,8 +283,8 @@ export default function HomePage() {
       }
 
       result.push({
-        mondayDate: getNextMondayFromFriday(lastWeek.weekEndDate),
-        basedOnFriday: lastWeek.weekEndDate,
+        mondayDate: getNextMondayFromFriday(lastWeek.date),
+        basedOnFriday: lastWeek.date,
         close: lastWeek.close,
         rsi: lastWeek.rsi as number,
         mode: activeMode,
@@ -319,7 +306,7 @@ export default function HomePage() {
 
   const rsiChartRows = validModeHistory.slice(-50);
   const rsiChartValues = rsiChartRows.map((row) => row.rsi);
-  const rsiChartPath = buildLinePath(
+  const rsiChartPath = buildRSILinePath(
     rsiChartValues,
     RSI_CHART_WIDTH,
     RSI_CHART_HEIGHT
@@ -329,50 +316,41 @@ export default function HomePage() {
     RSI_CHART_WIDTH,
     RSI_CHART_HEIGHT
   );
-  const rsiXAxisTicks = getEvenlySpacedLabels(rsiChartRows, 6);
-
-  const modeMap = useMemo(() => {
-    const map = new Map<string, ModeType | null>();
-    for (const row of validModeHistory) {
-      map.set(row.mondayDate, row.mode);
-    }
-    return map;
-  }, [validModeHistory]);
+  const rsiXAxisTicks = getEvenlySpacedLabels(rsiChartRows, 8);
 
   const visibleMondaySet = new Set(rsiChartRows.map((row) => row.mondayDate));
+  const modeMap = new Map<string, ModeType | null>();
+  for (const row of validModeHistory) {
+    modeMap.set(row.mondayDate, row.mode);
+  }
 
-  const dailyChartRows = useMemo<DailyChartRow[]>(() => {
-    return rows
-      .map((row) => {
-        const mondayDate = getMondayOfWeek(row.date);
-        return {
-          ...row,
-          mondayDate,
-          mode: modeMap.get(mondayDate) ?? null,
-        };
-      })
-      .filter((row) => visibleMondaySet.has(row.mondayDate));
-  }, [rows, modeMap, visibleMondaySet]);
+  const visibleDailyRows = dailyRows
+    .map((row) => {
+      const mondayDate = getMondayOfWeek(row.date);
+      return {
+        ...row,
+        mondayDate,
+        mode: modeMap.get(mondayDate) ?? null,
+      } as DailyChartRow;
+    })
+    .filter((row) => visibleMondaySet.has(row.mondayDate));
 
-  const dailyChartValues = dailyChartRows.map((row) => row.close);
-  const dailyChartPath = (() => {
-    const points = buildPriceChartPoints(
-      dailyChartValues,
-      PRICE_CHART_WIDTH,
-      PRICE_CHART_HEIGHT
-    );
-    if (points.length === 0) return "";
-    return `M ${points.map((p) => `${p.x},${p.y}`).join(" L ")}`;
-  })();
-  const dailyChartPoints = buildPriceChartPoints(
-    dailyChartValues,
+  const priceChartRows = visibleDailyRows.slice(-100);
+  const priceChartValues = priceChartRows.map((row) => row.close);
+  const priceChartPath = buildLinePath(
+    priceChartValues,
     PRICE_CHART_WIDTH,
     PRICE_CHART_HEIGHT
   );
-  const dailyXAxisTicks = getEvenlySpacedLabels(dailyChartRows, 8);
+  const priceChartPoints = buildPriceChartPoints(
+    priceChartValues,
+    PRICE_CHART_WIDTH,
+    PRICE_CHART_HEIGHT
+  );
+  const priceXAxisTicks = getEvenlySpacedLabels(priceChartRows, 8);
 
-  const priceMin = dailyChartValues.length ? Math.min(...dailyChartValues) : 0;
-  const priceMax = dailyChartValues.length ? Math.max(...dailyChartValues) : 0;
+  const priceMin = priceChartValues.length ? Math.min(...priceChartValues) : 0;
+  const priceMax = priceChartValues.length ? Math.max(...priceChartValues) : 0;
   const pricePadding = (priceMax - priceMin) * 0.05 || 1;
   const priceBottom = Math.floor(priceMin - pricePadding);
   const priceTop = Math.ceil(priceMax + pricePadding);
@@ -392,7 +370,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          전전주·전주 RSI를 기준으로, 다음 월요일부터 적용되는 주간 매매 모드를 표시한다.
+          주봉 RSI와 주간 모드는 50주 기준으로 보고, 일봉 차트는 무료 API 한도상 최근 100거래일만 표시한다.
         </p>
 
         {loading ? (
@@ -444,8 +422,7 @@ export default function HomePage() {
 
                   {rsiXAxisTicks.map(({ item, index }) => {
                     const x =
-                      60 +
-                      (index / Math.max(rsiXAxisTicks.length - 1, 1)) * RSI_CHART_WIDTH;
+                      60 + (index / Math.max(rsiXAxisTicks.length - 1, 1)) * RSI_CHART_WIDTH;
                     return (
                       <text
                         key={`rsi-x-${item.mondayDate}-${index}`}
@@ -477,12 +454,7 @@ export default function HomePage() {
                             stroke="#ffffff"
                             strokeWidth="1.2"
                           />
-                          <circle
-                            cx={point.x}
-                            cy={point.y}
-                            r="8"
-                            fill="transparent"
-                          >
+                          <circle cx={point.x} cy={point.y} r="8" fill="transparent">
                             <title>{`${row.mondayDate} | RSI ${row.rsi} | ${row.mode ?? "-"}`}</title>
                           </circle>
                         </g>
@@ -491,22 +463,10 @@ export default function HomePage() {
                   </g>
                 </svg>
               </div>
-
-              <div className="mt-3 flex flex-wrap gap-6 text-sm text-slate-500">
-                <span>기준선: 70 / 50 / 30</span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded-full bg-red-600" />
-                  공격모드
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded-full bg-green-600" />
-                  안전모드
-                </span>
-              </div>
             </section>
 
             <section className="mt-8 rounded-2xl border bg-white p-6 shadow-sm">
-              <h2 className="text-xl font-semibold">QQQ 일봉 차트 (최근 50주 구간)</h2>
+              <h2 className="text-xl font-semibold">QQQ 일봉 차트 (최근 100거래일)</h2>
 
               <div className="mt-4 overflow-x-auto">
                 <svg viewBox="0 0 920 340" className="h-[340px] w-full min-w-[920px]">
@@ -545,14 +505,12 @@ export default function HomePage() {
                     {priceBottom}
                   </text>
 
-                  {dailyXAxisTicks.map(({ item, index }) => {
+                  {priceXAxisTicks.map(({ item, index }) => {
                     const x =
-                      60 +
-                      (index / Math.max(dailyXAxisTicks.length - 1, 1)) *
-                        PRICE_CHART_WIDTH;
+                      60 + (index / Math.max(priceXAxisTicks.length - 1, 1)) * PRICE_CHART_WIDTH;
                     return (
                       <text
-                        key={`daily-x-${item.date}-${index}`}
+                        key={`price-x-${item.date}-${index}`}
                         x={x}
                         y="315"
                         fontSize="12"
@@ -565,10 +523,10 @@ export default function HomePage() {
                   })}
 
                   <g transform="translate(60, 20)">
-                    <path d={dailyChartPath} fill="none" stroke="#0f172a" strokeWidth="1.8" />
+                    <path d={priceChartPath} fill="none" stroke="#0f172a" strokeWidth="1.8" />
 
-                    {dailyChartPoints.map((point, index) => {
-                      const row = dailyChartRows[index];
+                    {priceChartPoints.map((point, index) => {
+                      const row = priceChartRows[index];
                       const pointColor = getModePointColor(row.mode);
 
                       return (
@@ -581,12 +539,7 @@ export default function HomePage() {
                             stroke="#ffffff"
                             strokeWidth="0.8"
                           />
-                          <circle
-                            cx={point.x}
-                            cy={point.y}
-                            r="7"
-                            fill="transparent"
-                          >
+                          <circle cx={point.x} cy={point.y} r="7" fill="transparent">
                             <title>{`${row.date} | 종가 ${row.close.toFixed(2)} | ${row.mode ?? "-"}`}</title>
                           </circle>
                         </g>
@@ -594,18 +547,6 @@ export default function HomePage() {
                     })}
                   </g>
                 </svg>
-              </div>
-
-              <div className="mt-3 flex flex-wrap gap-6 text-sm text-slate-500">
-                <span>최근 50주에 해당하는 일봉 구간</span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded-full bg-red-600" />
-                  공격모드
-                </span>
-                <span className="inline-flex items-center gap-2">
-                  <span className="inline-block h-3 w-3 rounded-full bg-green-600" />
-                  안전모드
-                </span>
               </div>
             </section>
 
