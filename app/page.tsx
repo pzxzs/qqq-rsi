@@ -18,11 +18,11 @@ type WeeklyRSIRow = WeeklyRow & {
 type ModeType = "공격모드" | "안전모드";
 
 type WeeklyModeRow = {
-  mondayDate: string;   // 실제 표시할 주간 시작일(월요일)
-  basedOnFriday: string; // 이 모드를 결정한 직전 금요일
-  close: number;
-  rsi: number;
-  mode: ModeType | null;
+  mondayDate: string;      // 실제 적용 주간의 월요일
+  basedOnFriday: string;   // 직전 금요일 (전주)
+  close: number;           // 직전 금요일 종가
+  rsi: number;             // 직전 금요일 RSI
+  mode: ModeType | null;   // 해당 월요일 주간 모드
 };
 
 function addDays(dateStr: string, days: number) {
@@ -87,24 +87,35 @@ function buildLinePath(values: number[], width: number, height: number) {
   return `M ${points.join(" L ")}`;
 }
 
-function getTriggeredMode(prev: number, curr: number): ModeType | null {
-  const isUp = curr > prev;
-  const isDown = curr < prev;
+/**
+ * 월요일 주간 모드를 결정할 때 쓰는 비교 기준:
+ * - twoWeeksAgoRsi = 전전주 금요일 RSI
+ * - lastWeekRsi    = 전주 금요일 RSI
+ *
+ * 즉, 월요일에 모드 결정 시
+ * 전전주와 전주의 확정 RSI를 비교한다.
+ */
+function getTriggeredMode(
+  twoWeeksAgoRsi: number,
+  lastWeekRsi: number
+): ModeType | null {
+  const isUp = lastWeekRsi > twoWeeksAgoRsi;
+  const isDown = lastWeekRsi < twoWeeksAgoRsi;
 
-  // 공격모드 조건
+  // 공격모드 전환
   if (
-    (prev <= 50 && curr > 50) ||           // RSI가 50 위로 상승
-    (curr > 50 && curr < 60 && isUp) ||    // 50 < RSI < 60 에서 상승
-    (curr < 35 && isUp)                    // RSI < 35 영역에서 상승
+    (twoWeeksAgoRsi < 50 && lastWeekRsi > 50) ||                  // 이전 RSI가 50 미만에서 50 초과로 상승 돌파
+    (twoWeeksAgoRsi >= 50 && twoWeeksAgoRsi <= 60 && isUp) ||    // 이전 RSI가 50~60 사이에서 상승 전환
+    (twoWeeksAgoRsi <= 35 && isUp)                                // 이전 RSI가 35 이하에서 상승 전환
   ) {
     return "공격모드";
   }
 
-  // 안전모드 조건
+  // 안전모드 전환
   if (
-    (curr > 65 && isDown) ||               // RSI > 65 영역에서 하락
-    (curr > 40 && curr < 50 && isDown) ||  // 40 < RSI < 50 에서 하락
-    (prev >= 50 && curr < 50)              // RSI가 50 밑으로 하락
+    (twoWeeksAgoRsi >= 65 && isDown) ||                           // 이전 RSI가 65 이상에서 하락 전환
+    (twoWeeksAgoRsi >= 40 && twoWeeksAgoRsi <= 50 && isDown) ||  // 이전 RSI가 40~50 사이에서 하락 전환
+    (twoWeeksAgoRsi >= 50 && lastWeekRsi < 50)                   // 이전 RSI가 50 이상에서 50 미만으로 하락 돌파
   ) {
     return "안전모드";
   }
@@ -163,6 +174,15 @@ export default function HomePage() {
     return calculateCutlerRSI(rows, 14).filter((row) => row.rsi !== null);
   }, [rows]);
 
+  /**
+   * modeHistory의 각 행은 "월요일 기준 주간 모드"
+   *
+   * 예:
+   * i=1 이면
+   * - weeklyRSI[0] = 전전주 금요일 RSI
+   * - weeklyRSI[1] = 전주 금요일 RSI
+   * - weeklyRSI[1]의 다음 월요일 주간 모드를 결정
+   */
   const modeHistory = useMemo<WeeklyModeRow[]>(() => {
     if (weeklyRSI.length < 2) return [];
 
@@ -170,12 +190,12 @@ export default function HomePage() {
     let activeMode: ModeType | null = null;
 
     for (let i = 1; i < weeklyRSI.length; i++) {
-      const prevRow = weeklyRSI[i - 1]; // 전전주 금요일
-      const currRow = weeklyRSI[i];     // 전주 금요일
+      const twoWeeksAgo = weeklyRSI[i - 1];
+      const lastWeek = weeklyRSI[i];
 
       const triggeredMode = getTriggeredMode(
-        prevRow.rsi as number,
-        currRow.rsi as number
+        twoWeeksAgo.rsi as number,
+        lastWeek.rsi as number
       );
 
       if (triggeredMode !== null) {
@@ -183,10 +203,10 @@ export default function HomePage() {
       }
 
       result.push({
-        mondayDate: getNextMondayFromFriday(currRow.date), // 이 월요일 주간 모드
-        basedOnFriday: currRow.date,
-        close: currRow.close,
-        rsi: currRow.rsi as number,
+        mondayDate: getNextMondayFromFriday(lastWeek.date),
+        basedOnFriday: lastWeek.date,
+        close: lastWeek.close,
+        rsi: lastWeek.rsi as number,
         mode: activeMode,
       });
     }
@@ -208,7 +228,7 @@ export default function HomePage() {
       <div className="mx-auto max-w-6xl px-6 py-10">
         <h1 className="text-3xl font-bold">QQQ 주봉 Cutler RSI</h1>
         <p className="mt-2 text-sm text-slate-600">
-          금요일에 확정된 RSI를 기준으로, 다음 월요일 주간에 적용되는 매매 모드를 표시한다.
+          전전주·전주 RSI를 기준으로, 다음 월요일부터 적용되는 주간 매매 모드를 표시한다.
         </p>
 
         {loading ? (
@@ -226,12 +246,12 @@ export default function HomePage() {
               </div>
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
-                <div className="text-sm text-slate-500">현재 주간 시작일</div>
+                <div className="text-sm text-slate-500">현재 주간 시작일(월)</div>
                 <div className="mt-2 text-2xl font-semibold">{currentMondayDate}</div>
               </div>
 
               <div className="rounded-2xl border bg-white p-6 shadow-sm">
-                <div className="text-sm text-slate-500">최근 확정 RSI(직전 금요일)</div>
+                <div className="text-sm text-slate-500">전주 확정 RSI(직전 금요일)</div>
                 <div className="mt-2 text-2xl font-semibold">
                   {latestRSI ? latestRSI.rsi : "-"}
                 </div>
@@ -272,7 +292,7 @@ export default function HomePage() {
                   <thead>
                     <tr className="border-b bg-slate-100 text-left">
                       <th className="px-4 py-3">주간 시작일(월)</th>
-                      <th className="px-4 py-3">기준 RSI 계산일(직전 금)</th>
+                      <th className="px-4 py-3">기준 RSI 계산일(전주 금)</th>
                       <th className="px-4 py-3">종가</th>
                       <th className="px-4 py-3">RSI</th>
                       <th className="px-4 py-3">그 주간 모드</th>
