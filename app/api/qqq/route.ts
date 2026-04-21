@@ -18,6 +18,10 @@ type AlphaVantageWeeklyRow = {
   "5. volume": string;
 };
 
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 export async function GET() {
   const apiKey = process.env.ALPHA_VANTAGE_API_KEY;
 
@@ -34,34 +38,52 @@ export async function GET() {
   const weeklyUrl =
     `https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY&symbol=QQQ&apikey=${apiKey}`;
 
-  const [dailyRes, weeklyRes] = await Promise.all([
-    fetch(dailyUrl, { cache: "no-store" }),
-    fetch(weeklyUrl, { cache: "no-store" }),
-  ]);
+  // 무료 키는 초당 1회 제한이 있어서 순차 호출 + 대기
+  const dailyRes = await fetch(dailyUrl, { cache: "no-store" });
+  const dailyData = await dailyRes.json();
 
-  if (!dailyRes.ok || !weeklyRes.ok) {
+  if (!dailyRes.ok) {
     return NextResponse.json(
-      { error: "외부 데이터 요청에 실패했습니다." },
+      { error: "일봉 데이터 요청에 실패했습니다." },
       { status: 502 }
     );
   }
 
-  const [dailyData, weeklyData] = await Promise.all([
-    dailyRes.json(),
-    weeklyRes.json(),
-  ]);
-
-  const errorMessage =
-    dailyData["Error Message"] ||
-    weeklyData["Error Message"] ||
-    dailyData["Note"] ||
-    weeklyData["Note"] ||
-    dailyData["Information"] ||
-    weeklyData["Information"];
-
-  if (errorMessage) {
+  if (dailyData["Error Message"] || dailyData["Note"] || dailyData["Information"]) {
     return NextResponse.json(
-      { error: "Alpha Vantage 응답 오류", detail: errorMessage },
+      {
+        error: "Alpha Vantage 일봉 응답 오류",
+        detail:
+          dailyData["Error Message"] ||
+          dailyData["Note"] ||
+          dailyData["Information"],
+      },
+      { status: 500 }
+    );
+  }
+
+  // burst limit 회피
+  await sleep(1200);
+
+  const weeklyRes = await fetch(weeklyUrl, { cache: "no-store" });
+  const weeklyData = await weeklyRes.json();
+
+  if (!weeklyRes.ok) {
+    return NextResponse.json(
+      { error: "주봉 데이터 요청에 실패했습니다." },
+      { status: 502 }
+    );
+  }
+
+  if (weeklyData["Error Message"] || weeklyData["Note"] || weeklyData["Information"]) {
+    return NextResponse.json(
+      {
+        error: "Alpha Vantage 주봉 응답 오류",
+        detail:
+          weeklyData["Error Message"] ||
+          weeklyData["Note"] ||
+          weeklyData["Information"],
+      },
       { status: 500 }
     );
   }
@@ -105,7 +127,7 @@ export async function GET() {
 
   const weeklyRows = Object.entries(weeklySeries)
     .map(([date, value]) => ({
-      date, // 금요일 기준
+      date,
       open: Number(value["1. open"]),
       high: Number(value["2. high"]),
       low: Number(value["3. low"]),
