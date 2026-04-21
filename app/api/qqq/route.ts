@@ -2,14 +2,12 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-type AlphaVantageWeeklyRow = {
+type AlphaVantageDailyRow = {
   "1. open": string;
   "2. high": string;
   "3. low": string;
   "4. close": string;
-  "5. adjusted close": string;
-  "6. volume": string;
-  "7. dividend amount": string;
+  "5. volume": string;
 };
 
 export async function GET() {
@@ -22,8 +20,7 @@ export async function GET() {
     );
   }
 
-  const url =
-    `https://www.alphavantage.co/query?function=TIME_SERIES_WEEKLY_ADJUSTED&symbol=QQQ&apikey=${apiKey}`;
+  const url = `https://www.alphavantage.co/query?function=TIME_SERIES_DAILY&symbol=QQQ&outputsize=full&apikey=${apiKey}`;
 
   const res = await fetch(url, { cache: "no-store" });
 
@@ -57,13 +54,13 @@ export async function GET() {
     );
   }
 
-  const series = data["Weekly Adjusted Time Series"] as
-    | Record<string, AlphaVantageWeeklyRow>
+  const series = data["Time Series (Daily)"] as
+    | Record<string, AlphaVantageDailyRow>
     | undefined;
 
   if (!series) {
     return NextResponse.json(
-      { error: "주봉 데이터가 없습니다.", raw: data },
+      { error: "일봉 데이터가 없습니다.", raw: data },
       { status: 500 }
     );
   }
@@ -75,7 +72,7 @@ export async function GET() {
       high: Number(value["2. high"]),
       low: Number(value["3. low"]),
       close: Number(value["4. close"]),
-      volume: Number(value["6. volume"]),
+      volume: Number(value["5. volume"]),
     }))
     .filter(
       (row) =>
