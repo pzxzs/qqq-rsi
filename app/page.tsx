@@ -18,11 +18,17 @@ type WeeklyRSIRow = WeeklyRow & {
 type ModeType = "공격모드" | "안전모드";
 
 type WeeklyModeRow = {
-  mondayDate: string;      // 실제 적용 주간의 월요일
-  basedOnFriday: string;   // 직전 금요일 (전주)
-  close: number;           // 직전 금요일 종가
-  rsi: number;             // 직전 금요일 RSI
-  mode: ModeType | null;   // 해당 월요일 주간 모드
+  mondayDate: string; // 실제 적용 주간의 월요일
+  basedOnFriday: string; // 직전 금요일(전주)
+  close: number; // 직전 금요일 종가
+  rsi: number; // 직전 금요일 RSI
+  mode: ModeType | null; // 해당 월요일 주간 모드
+};
+
+type ChartPoint = {
+  x: number;
+  y: number;
+  value: number;
 };
 
 function addDays(dateStr: string, days: number) {
@@ -87,13 +93,18 @@ function buildLinePath(values: number[], width: number, height: number) {
   return `M ${points.join(" L ")}`;
 }
 
+function buildChartPoints(values: number[], width: number, height: number): ChartPoint[] {
+  return values.map((v, i) => {
+    const x = (i / Math.max(values.length - 1, 1)) * width;
+    const y = height - (v / 100) * height;
+    return { x, y, value: v };
+  });
+}
+
 /**
  * 월요일 주간 모드를 결정할 때 쓰는 비교 기준:
  * - twoWeeksAgoRsi = 전전주 금요일 RSI
  * - lastWeekRsi    = 전주 금요일 RSI
- *
- * 즉, 월요일에 모드 결정 시
- * 전전주와 전주의 확정 RSI를 비교한다.
  */
 function getTriggeredMode(
   twoWeeksAgoRsi: number,
@@ -104,18 +115,18 @@ function getTriggeredMode(
 
   // 공격모드 전환
   if (
-    (twoWeeksAgoRsi < 50 && lastWeekRsi > 50) ||                  // 이전 RSI가 50 미만에서 50 초과로 상승 돌파
-    (twoWeeksAgoRsi >= 50 && twoWeeksAgoRsi <= 60 && isUp) ||    // 이전 RSI가 50~60 사이에서 상승 전환
-    (twoWeeksAgoRsi <= 35 && isUp)                                // 이전 RSI가 35 이하에서 상승 전환
+    (twoWeeksAgoRsi < 50 && lastWeekRsi > 50) || // 이전 RSI가 50 미만에서 50 초과로 상승 돌파
+    (twoWeeksAgoRsi >= 50 && twoWeeksAgoRsi <= 60 && isUp) || // 이전 RSI가 50~60 사이에서 상승 전환
+    (twoWeeksAgoRsi <= 35 && isUp) // 이전 RSI가 35 이하에서 상승 전환
   ) {
     return "공격모드";
   }
 
   // 안전모드 전환
   if (
-    (twoWeeksAgoRsi >= 65 && isDown) ||                           // 이전 RSI가 65 이상에서 하락 전환
-    (twoWeeksAgoRsi >= 40 && twoWeeksAgoRsi <= 50 && isDown) ||  // 이전 RSI가 40~50 사이에서 하락 전환
-    (twoWeeksAgoRsi >= 50 && lastWeekRsi < 50)                   // 이전 RSI가 50 이상에서 50 미만으로 하락 돌파
+    (twoWeeksAgoRsi >= 65 && isDown) || // 이전 RSI가 65 이상에서 하락 전환
+    (twoWeeksAgoRsi >= 40 && twoWeeksAgoRsi <= 50 && isDown) || // 이전 RSI가 40~50 사이에서 하락 전환
+    (twoWeeksAgoRsi >= 50 && lastWeekRsi < 50) // 이전 RSI가 50 이상에서 50 미만으로 하락 돌파
   ) {
     return "안전모드";
   }
@@ -127,6 +138,12 @@ function getModeColorClass(mode: ModeType | null) {
   if (mode === "공격모드") return "text-red-600";
   if (mode === "안전모드") return "text-green-600";
   return "text-gray-400";
+}
+
+function getModePointColor(mode: ModeType | null) {
+  if (mode === "공격모드") return "#dc2626"; // red-600
+  if (mode === "안전모드") return "#16a34a"; // green-600
+  return "#94a3b8"; // slate-400
 }
 
 export default function HomePage() {
@@ -176,12 +193,10 @@ export default function HomePage() {
 
   /**
    * modeHistory의 각 행은 "월요일 기준 주간 모드"
-   *
    * 예:
-   * i=1 이면
-   * - weeklyRSI[0] = 전전주 금요일 RSI
-   * - weeklyRSI[1] = 전주 금요일 RSI
-   * - weeklyRSI[1]의 다음 월요일 주간 모드를 결정
+   * - weeklyRSI[i - 1] = 전전주 금요일 RSI
+   * - weeklyRSI[i]     = 전주 금요일 RSI
+   * - 그 비교 결과로 weeklyRSI[i] 다음 월요일 주간 모드를 결정
    */
   const modeHistory = useMemo<WeeklyModeRow[]>(() => {
     if (weeklyRSI.length < 2) return [];
@@ -219,9 +234,15 @@ export default function HomePage() {
   const currentWeekMode = currentModeRow?.mode ?? null;
   const currentMondayDate = currentModeRow?.mondayDate ?? "-";
 
-  const chartRows = weeklyRSI.slice(-40);
-  const chartValues = chartRows.map((r) => r.rsi as number);
-  const path = buildLinePath(chartValues, 800, 260);
+  const chartModeRows = modeHistory.slice(-40);
+  const chartValues = chartModeRows.map((row) => row.rsi);
+  const chartPath = buildLinePath(chartValues, 740, 220);
+  const chartPoints = buildChartPoints(chartValues, 740, 220);
+
+  const firstChartMonday = chartModeRows[0]?.mondayDate ?? "";
+  const middleChartMonday =
+    chartModeRows[Math.floor(chartModeRows.length / 2)]?.mondayDate ?? "";
+  const lastChartMonday = chartModeRows[chartModeRows.length - 1]?.mondayDate ?? "";
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-900">
@@ -269,18 +290,68 @@ export default function HomePage() {
               <h2 className="text-xl font-semibold">최근 40주 RSI 차트</h2>
 
               <div className="mt-4 overflow-x-auto">
-                <svg viewBox="0 0 800 260" className="h-[260px] w-full min-w-[800px]">
-                  <line x1="0" y1="78" x2="800" y2="78" stroke="#cbd5e1" strokeDasharray="4 4" />
-                  <line x1="0" y1="130" x2="800" y2="130" stroke="#cbd5e1" strokeDasharray="4 4" />
-                  <line x1="0" y1="182" x2="800" y2="182" stroke="#cbd5e1" strokeDasharray="4 4" />
-                  <path d={path} fill="none" stroke="#0f172a" strokeWidth="3" />
+                <svg viewBox="0 0 820 300" className="h-[300px] w-full min-w-[820px]">
+                  {/* Y축 기준선 */}
+                  <line x1="50" y1="66" x2="790" y2="66" stroke="#cbd5e1" strokeDasharray="4 4" />
+                  <line x1="50" y1="110" x2="790" y2="110" stroke="#cbd5e1" strokeDasharray="4 4" />
+                  <line x1="50" y1="154" x2="790" y2="154" stroke="#cbd5e1" strokeDasharray="4 4" />
+
+                  {/* Y축 라벨 */}
+                  <text x="18" y="70" fontSize="12" fill="#64748b">70</text>
+                  <text x="18" y="114" fontSize="12" fill="#64748b">50</text>
+                  <text x="18" y="158" fontSize="12" fill="#64748b">30</text>
+
+                  {/* X축 날짜 */}
+                  {chartModeRows.length > 0 && (
+                    <>
+                      <text x="50" y="285" fontSize="12" fill="#64748b">
+                        {firstChartMonday}
+                      </text>
+                      <text x="350" y="285" fontSize="12" fill="#64748b">
+                        {middleChartMonday}
+                      </text>
+                      <text x="670" y="285" fontSize="12" fill="#64748b">
+                        {lastChartMonday}
+                      </text>
+                    </>
+                  )}
+
+                  {/* 그래프 영역 */}
+                  <g transform="translate(50, 0)">
+                    <path d={chartPath} fill="none" stroke="#0f172a" strokeWidth="2.5" />
+
+                    {chartPoints.map((point, index) => {
+                      const row = chartModeRows[index];
+                      const pointColor = getModePointColor(row.mode);
+
+                      return (
+                        <circle
+                          key={`${row.mondayDate}-${index}`}
+                          cx={point.x}
+                          cy={point.y}
+                          r="4.5"
+                          fill={pointColor}
+                          stroke="#ffffff"
+                          strokeWidth="1.5"
+                        >
+                          <title>{`${row.mondayDate} | RSI ${row.rsi} | ${row.mode ?? "-"}`}</title>
+                        </circle>
+                      );
+                    })}
+                  </g>
                 </svg>
               </div>
 
-              <div className="mt-3 flex gap-4 text-sm text-slate-500">
-                <span>70</span>
-                <span>50</span>
-                <span>30</span>
+              <div className="mt-3 flex gap-6 text-sm text-slate-500">
+                <span>기준선: 70 / 50 / 30</span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 rounded-full bg-red-600" />
+                  공격모드
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-block h-3 w-3 rounded-full bg-green-600" />
+                  안전모드
+                </span>
               </div>
             </section>
 
